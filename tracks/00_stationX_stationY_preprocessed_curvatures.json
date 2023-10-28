@@ -5,8 +5,8 @@
         "library version": "TTOBench v1.1",
         "license": "BSD 2-Clause License",
         "preprocessing": {
-            "original file": "00_stationX_stationY_with_transition_curves.json",
-            "curvatures": "nonnegative radii; transitions replaced by average of (abs) of involved radii"
+            "original file": "00_stationX_stationY.json",
+            "curvatures": "nonnegative radii; transitions replaced by average of (abs values of) involved radii"
         }
     },
     "altitude": {
