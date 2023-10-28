@@ -118,25 +118,27 @@ class IVP():
 
         f = var('force')
         gd = var('gradient')
+        cr = var('curvatureRadius')
         dt = var('dt')
         m = var('mass') if lossesFun is not None else []
 
         rollingResistance = model.sr0 + model.sr1*v + model.sr2*v**2
-        acceleration = f - rollingResistance - model.g*gd*(1/model.rho)
+        acceleration = f - rollingResistance - model.g*gd*(1/model.rho) \
+            - ca.if_else(cr>=300, model.g*0.5/((cr-30)*model.rho), ca.if_else(cr>0, model.g*0.65/((cr-55)*model.rho), 0))
 
         ode = ca.vertcat(dt*v, dt*acceleration, dt*lossesFun(f*m, v)/m if lossesFun is not None else [])
         t0, tf = 0, 1
-        self.fun = ca.integrator('integrator', 'cvodes', {'x':ca.vertcat(s,v,e), 'p':ca.vertcat(f,gd,dt,m), 'ode':ode}, t0, tf, {'abstol':1e-12, 'reltol':1e-14})
+        self.fun = ca.integrator('integrator', 'cvodes', {'x':ca.vertcat(s,v,e), 'p':ca.vertcat(f,gd,cr,dt,m), 'ode':ode}, t0, tf, {'abstol':1e-12, 'reltol':1e-14})
         self.withLosses = lossesFun is not None
 
 
-    def solve(self, tf, t0=0, f=0, grd=0, v0=0, s0=0, m=None):
+    def solve(self, tf, t0=0, f=0, grd=0, cr=0, v0=0, s0=0, m=None):
 
         if m is None and self.withLosses:
 
             raise ValueError("Need to specify total mass when integrating losses!")
 
-        out = self.fun(x0=[s0, v0]+([0] if self.withLosses else []), p=[f, grd, tf-t0] + ([m] if self.withLosses else []))['xf']
+        out = self.fun(x0=[s0, v0]+([0] if self.withLosses else []), p=[f, grd, cr, tf-t0] + ([m] if self.withLosses else []))['xf']
 
         sf = vecToNum(out[0])
         vf = vecToNum(out[1])
@@ -146,6 +148,7 @@ class IVP():
         self.tf = tf
         self.f = f
         self.grd = grd
+        self.cr = cr
         self.s0 = s0
         self.sf = sf
         self.v0 = v0
@@ -171,7 +174,8 @@ def simulateCVODES(dfIn, model, totalMass, accumulatedErrors=True):
         pos = posCVODES[-1] if accumulatedErrors else dfIn['Position [m]'].iloc[ii]
         vel = velCVODES[-1] if accumulatedErrors else dfIn['Velocity [m/s]'].iloc[ii]
 
-        posNxt, velNxt = ivp.solve(tf=dt, f=dfIn['Force [N]'].iloc[ii]/totalMass, grd=dfIn['Gradient [permil]'].iloc[ii]/1e3, v0=vel, s0=pos)
+        posNxt, velNxt = ivp.solve(tf=dt, f=dfIn['Force [N]'].iloc[ii]/totalMass, grd=dfIn['Gradient [permil]'].iloc[ii]/1e3,\
+                                   cr=dfIn['Curvature radius [m]'].iloc[ii], v0=vel, s0=pos)
 
         posCVODES += [posNxt]
         velCVODES += [velNxt]
@@ -222,6 +226,7 @@ def postProcessDataFrame(dfIn, points, train, CVODES=True, integrateLosses=False
 
     dfOut['Speed limit [m/s]'] = points['Speed limit [m/s]'].values
     dfOut['Gradient [permil]'] = points['Gradient [permil]'].values
+    dfOut['Curvature radius [m]'] = points['Curvature radius [m]'].values
     dfOut['Force (acc) [N]'] = dfOut['Force (el) [N]']*(dfOut['Force (el) [N]'] >= 0)
     dfOut['Force (rgb) [N]'] = dfOut['Force (el) [N]']*(dfOut['Force (el) [N]'] < 0)
     dfOut['Force [N]'] = dfOut['Force (acc) [N]'] + dfOut['Force (rgb) [N]'] + dfOut['Force (pnb) [N]']
@@ -266,6 +271,7 @@ def postProcessDataFrame(dfIn, points, train, CVODES=True, integrateLosses=False
         fs = (dfOut['Force (el) [N]']/totalMass).values.tolist()
         ps = (dfOut['Force (pnb) [N]']/totalMass).values.tolist()
         gs = (dfOut['Gradient [permil]']/1e3).values.tolist()
+        cr = dfOut['Curvature radius [m]'].values.tolist()
 
         losses = []
 
@@ -273,7 +279,7 @@ def postProcessDataFrame(dfIn, points, train, CVODES=True, integrateLosses=False
 
             dt = ts[jj+1]-ts[jj]
 
-            eTr, eRgb = trainIntegrator.calcLosses(vs[jj], dt, fs[jj], ps[jj], gs[jj])
+            eTr, eRgb = trainIntegrator.calcLosses(vs[jj], dt, fs[jj], ps[jj], gs[jj], cr[jj])
 
             eEl = eTr if fs[jj] >= 0 else eRgb
 
@@ -298,6 +304,7 @@ def postProcessDataFrame(dfIn, points, train, CVODES=True, integrateLosses=False
         fs = (dfOut['Force (acc) [N]']/totalMass).values.tolist()
         ps = (dfOut['Force (pnb) [N]']/totalMass).values.tolist()
         gs = (dfOut['Gradient [permil]']/1e3).values.tolist()
+        cr = dfOut['Curvature radius [m]'].values.tolist()
 
         rr = []
 
@@ -305,19 +312,22 @@ def postProcessDataFrame(dfIn, points, train, CVODES=True, integrateLosses=False
 
             ds = ss[jj+1]-ss[jj]
 
-            loss, _ = trainIntegrator.calcRollingResistance(vs[jj], ds, fs[jj], ps[jj], gs[jj])
+            loss, _ = trainIntegrator.calcRollingResistance(vs[jj], ds, fs[jj], ps[jj], gs[jj], cr[jj])
 
             rr.append(totalMass*vecToNum(loss))
 
         dfOut['Rolling resistance [kWh]'] = np.append(unitScaling*np.array(rr), None)
 
     rrFun = lambda v: (train.r0 + train.r1*v + train.r2*v**2)/totalMass
+    crFun = lambda cr: train.g*0.65/((cr-55)*train.rho)*(0<cr<300) + \
+        train.g*0.5/((cr-30)*train.rho)*(cr>=300)
 
     # instantaneous specific forces
     rollingResistance = dfOut['Velocity [m/s]'].apply(rrFun)
     gradientResistance = train.g*(dfOut['Gradient [permil]']/1000)/train.rho
+    curvatureResistance = dfOut['Curvature radius [m]'].apply(crFun)
 
-    dfOut['Acceleration [m/s^2]'] = dfOut['Force [N]']/totalMass - rollingResistance - gradientResistance
+    dfOut['Acceleration [m/s^2]'] = dfOut['Force [N]']/totalMass - rollingResistance - gradientResistance - curvatureResistance
 
     if CVODES:
 
