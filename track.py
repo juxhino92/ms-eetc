@@ -128,6 +128,8 @@ def computeDiscretizationPoints(track, numIntervals):
 
 class Track():
 
+    RADIUS_THRESHOLD = 150 # Smallest nonzero curvature radius allowed [m]
+
     def __init__(self, config, tUpper=None, pathJSON='tracks'):
         """
         Constructor of Track objects.
@@ -182,6 +184,7 @@ class Track():
 
         self.importSpeedLimitTuples(data['speed limits']['values'], data['speed limits']['units']['velocity'])
         self.importGradientTuples(data['gradients']['values'], data['gradients']['units']['slope'])
+        self.importCurvatureTuples(data['curvatures']['values'], data['curvatures']['units']['radius'])
 
         numStops = len(data['stops']['values'])
         indxDeparture = config['from'] if 'from' in config else 0
@@ -218,6 +221,20 @@ class Track():
         return True if self.speedLimits.shape[0] > 0 and checkDataFrame(self.speedLimits, self.length) else False
 
 
+    def curvaturesOk(self):
+
+        if (self.curvatures['Curvature radius [m]'] < 0.0).values.any():
+
+            return False
+        
+        if ((self.curvatures['Curvature radius [m]'] > 0.0) \
+            & (self.curvatures['Curvature radius [m]'] < Track.RADIUS_THRESHOLD)).values.any():
+
+            return False
+
+        return True if self.curvatures.shape[0] > 0 and checkDataFrame(self.curvatures, self.length) else False
+
+
     def checkFields(self):
 
         if not self.lengthOk():
@@ -239,6 +256,10 @@ class Track():
         if not self.speedLimitsOk():
 
             raise ValueError("Issue with track speed limits!")
+        
+        if not self.curvaturesOk():
+
+            raise ValueError("Issue with track curvatures!")
 
 
     def importGradientTuples(self, tuples, unit='permil'):
@@ -272,6 +293,22 @@ class Track():
         checkDataFrame(self.speedLimits, self.length)
 
 
+    def importCurvatureTuples(self, tuples, unit='m'):
+
+        if not self.lengthOk():
+
+            raise ValueError("Cannot import curvature without a valid track length!")
+
+        if unit not in {'m', 'km'}:
+
+            raise ValueError("Specified curvature radius unit not supported!")
+
+        tuples = [(p, convertUnit(r, unit)) for p,r in tuples]
+        self.curvatures = importTuples(tuples, 'Position [m]', 'Curvature radius [m]')
+
+        checkDataFrame(self.curvatures, self.length)
+
+
     def reverse(self):
         # switch to opposite trip
 
@@ -291,6 +328,7 @@ class Track():
 
         self.gradients = -flipData(self.gradients)
         self.speedLimits = flipData(self.speedLimits)
+        self.curvatures = flipData(self.curvatures)
 
         self.title = self.title + ' (reversed)'
 
@@ -299,10 +337,11 @@ class Track():
 
     def mergeDataFrames(self):
         """
-        Build dataframe with intervals of constant gradient and speed limit.
+        Build dataframe with intervals of constant gradient, speed limit and curvature radius.
         """
 
-        return self.gradients.join(self.speedLimits, how='outer').fillna(method='ffill')
+        joined_gradients_and_speedLimits = self.gradients.join(self.speedLimits, how='outer').fillna(method='ffill')
+        return self.curvatures.join(joined_gradients_and_speedLimits, how='outer').fillna(method='ffill')
 
 
     def print(self):
@@ -370,11 +409,15 @@ class Track():
 
         self.speedLimits = crop(self.speedLimits)
         self.gradients = crop(self.gradients)
+        self.curvatures = crop(self.curvatures)
 
 
 if __name__ == '__main__':
 
     # Example on how to load and plot a track
 
-    track = Track(config={'id':'00_stationX_stationY'}, tUpper=1300)
+    track = Track(config={'id':'00_stationX_stationY_no_curvature'}, tUpper=1300)
     track.plot()
+
+    track_with_curvature = Track(config={'id' : '00_stationX_stationY_preprocessed_curvatures'}, tUpper=1300)
+    # TODO: support curvature plot
