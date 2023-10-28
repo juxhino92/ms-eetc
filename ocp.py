@@ -201,17 +201,18 @@ class casadiSolver():
                     ubg += [abs(upperBound)]*2
                     lbg += [-abs(lowerBound)]*2
 
-                # gradient of current index
+                # gradient and curvature radius of current index
                 grad = self.points.iloc[i]['Gradient [permil]']/1e3
+                curvatureRadius = self.points.iloc[i]['Curvature radius [m]']
 
                 # acceleration constraints
-                g += [trainModel.accelerationFun(ca.vertcat(time[i], velSq[i]), ca.vcat(u), grad)]
+                g += [trainModel.accelerationFun(ca.vertcat(time[i], velSq[i]), ca.vcat(u), grad, curvatureRadius)]
                 lbg += [-abs(accMin) if accMin is not None else -10]
                 ubg += [abs(accMax) if accMax is not None else 10]
 
                 # coupling constraints
                 out = trainIntegrator.solve(time=time[i], velocitySquared=velSq[i], ds=self.steps[i],
-                    traction=Fel[i], pnBrake=Fpb[i], gradient=grad)
+                    traction=Fel[i], pnBrake=Fpb[i], gradient=grad, curvatureRadius=curvatureRadius)
 
                 xNxt1 = ca.vertcat(time[i+1], velSq[i+1])
                 xNxt2 = ca.vertcat(out['time'], out['velSquared'])
@@ -239,7 +240,7 @@ class casadiSolver():
 
                     else:
 
-                        energyLossesTr, energyLossesRgb = trainIntegrator.calcLosses(ca.sqrt(velSq[i]), time[i+1]-time[i], Fel[i], Fpb[i], grad)
+                        energyLossesTr, energyLossesRgb = trainIntegrator.calcLosses(ca.sqrt(velSq[i]), time[i+1]-time[i], Fel[i], Fpb[i], grad, curvatureRadius)
 
                         obj += self.steps[i]*Fel[i] + s[i]
 
