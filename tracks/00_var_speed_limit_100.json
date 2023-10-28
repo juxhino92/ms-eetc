@@ -47,5 +47,17 @@
                 0.0
             ]
         ]
+    },
+    "curvatures": {
+        "units":{
+            "position": "m",
+            "radius": "m"            
+        },
+        "values": [
+            [
+                0.0,
+                0.0
+            ]
+        ]   
     }
 }
